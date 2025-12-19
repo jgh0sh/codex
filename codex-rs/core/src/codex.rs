@@ -91,6 +91,7 @@ use crate::exec::StreamOutput;
 use crate::exec_policy::ExecPolicyUpdateError;
 use crate::mcp::auth::compute_auth_statuses;
 use crate::mcp_connection_manager::McpConnectionManager;
+use crate::memories;
 use crate::model_provider_info::CHAT_WIRE_API_DEPRECATION_SUMMARY;
 use crate::project_doc::get_user_instructions;
 use crate::protocol::AgentMessageContentDeltaEvent;
@@ -2228,6 +2229,8 @@ pub(crate) async fn run_task(
         return None;
     }
 
+    let input_for_memories = input.clone();
+
     let auto_compact_limit = turn_context
         .client
         .get_model_family()
@@ -2334,6 +2337,12 @@ pub(crate) async fn run_task(
                             input_messages: turn_input_messages,
                             last_assistant_message: last_agent_message.clone(),
                         });
+                    let mem_sess = Arc::clone(&sess);
+                    let mem_turn = Arc::clone(&turn_context);
+                    let mem_inputs = input_for_memories.clone();
+                    tokio::spawn(async move {
+                        memories::maybe_record_memories(&mem_sess, &mem_turn, &mem_inputs).await;
+                    });
                     break;
                 }
                 continue;
