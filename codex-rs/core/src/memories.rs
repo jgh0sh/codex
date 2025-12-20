@@ -27,11 +27,13 @@ pub(crate) const MEMORIES_HEADER: &str = "## Memories";
 pub(crate) const MEMORIES_SEPARATOR: &str = "\n\n--- memories ---\n\n";
 
 const MEMORIES_FILE_HEADER: &str = "# Memories";
+const MEMORIES_HISTORY_MAX_ITEMS: usize = 50;
 const MEMORIES_MAX_BYTES: usize = 8 * 1024;
 const MEMORIES_PROMPT: &str = include_str!("../templates/memories/prompt.md");
 const MEMORIES_PROMPT_MAX_BYTES: usize = 2000;
 const MAX_NEW_MEMORIES_PER_TURN: usize = 6;
 const NO_MEMORIES_RESPONSE: &str = "NO_MEMORIES";
+const TOOL_OUTPUT_MAX_BYTES: usize = 1000;
 
 pub(crate) async fn read_memories_for_instructions(config: &Config) -> Option<String> {
     let mut entries: Vec<String> = Vec::new();
@@ -75,7 +77,16 @@ pub(crate) async fn maybe_record_memories(
         return;
     }
 
-    let mut combined = input_texts.join("\n\n");
+    let history_tail = sess.clone_history_tail(MEMORIES_HISTORY_MAX_ITEMS).await;
+    let tool_outputs = collect_tool_outputs_from_history(&history_tail);
+
+    let mut sections = Vec::new();
+    sections.push(format!("User input:\n{}", input_texts.join("\n\n")));
+    if !tool_outputs.is_empty() {
+        sections.push(format!("Tool outputs:\n{}", tool_outputs.join("\n")));
+    }
+
+    let mut combined = sections.join("\n\n");
     if combined.len() > MEMORIES_PROMPT_MAX_BYTES {
         combined = truncate_text(
             &combined,
@@ -293,6 +304,52 @@ fn collect_user_input_texts(inputs: &[UserInput]) -> Vec<String> {
     texts
 }
 
+fn collect_tool_outputs_from_history(items: &[ResponseItem]) -> Vec<String> {
+    let start = items
+        .iter()
+        .rposition(is_user_message)
+        .map_or(0, |index| index + 1);
+    let mut outputs = Vec::new();
+    for item in &items[start..] {
+        match item {
+            ResponseItem::FunctionCallOutput { call_id, output } => {
+                if let Some(entry) = format_tool_output(call_id, output.success, &output.content) {
+                    outputs.push(entry);
+                }
+            }
+            ResponseItem::CustomToolCallOutput { call_id, output } => {
+                if let Some(entry) = format_tool_output(call_id, None, output) {
+                    outputs.push(entry);
+                }
+            }
+            _ => {}
+        }
+    }
+    outputs
+}
+
+fn is_user_message(item: &ResponseItem) -> bool {
+    matches!(item, ResponseItem::Message { role, .. } if role == "user")
+}
+
+fn format_tool_output(call_id: &str, success: Option<bool>, content: &str) -> Option<String> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let truncated = truncate_text(trimmed, TruncationPolicy::Bytes(TOOL_OUTPUT_MAX_BYTES));
+    let flattened = truncated.replace('\n', " ");
+    let entry = match success {
+        Some(success) => {
+            format!("call_id={call_id} success={success} output: {flattened}")
+        }
+        None => format!("call_id={call_id} output: {flattened}"),
+    };
+
+    Some(entry)
+}
+
 async fn append_memories(path: &Path, entries: &[String]) -> std::io::Result<usize> {
     if entries.is_empty() {
         return Ok(0);
@@ -352,6 +409,8 @@ async fn append_memories(path: &Path, entries: &[String]) -> std::io::Result<usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_protocol::models::FunctionCallOutputPayload;
+    use codex_protocol::models::ResponseItem;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -398,6 +457,51 @@ mod tests {
         assert_eq!(
             section,
             "## Memories\n- Prefer rustfmt\n- Run tests".to_string()
+        );
+    }
+
+    #[test]
+    fn collect_tool_outputs_from_history_uses_last_user_message() {
+        let items = vec![
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "first".to_string(),
+                }],
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call-1".to_string(),
+                output: FunctionCallOutputPayload {
+                    content: "first output".to_string(),
+                    content_items: None,
+                    success: Some(false),
+                },
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText {
+                    text: "ok".to_string(),
+                }],
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "second".to_string(),
+                }],
+            },
+            ResponseItem::CustomToolCallOutput {
+                call_id: "call-2".to_string(),
+                output: "second output".to_string(),
+            },
+        ];
+
+        let outputs = collect_tool_outputs_from_history(&items);
+        assert_eq!(
+            outputs,
+            vec!["call_id=call-2 output: second output".to_string()]
         );
     }
 }

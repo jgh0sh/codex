@@ -77,6 +77,15 @@ impl ContextManager {
         history
     }
 
+    pub(crate) fn tail(&self, max_items: usize) -> Vec<ResponseItem> {
+        if max_items == 0 {
+            return Vec::new();
+        }
+
+        let start = self.items.len().saturating_sub(max_items);
+        self.items[start..].to_vec()
+    }
+
     // Estimate token usage using byte-based heuristics from the truncation helpers.
     // This is a coarse lower bound, not a tokenizer-accurate count.
     pub(crate) fn estimate_token_count(&self, turn_context: &TurnContext) -> Option<i64> {

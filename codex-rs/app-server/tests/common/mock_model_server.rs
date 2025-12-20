@@ -9,7 +9,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 const MEMORIES_PROMPT_MARKER: &str =
-    "You are extracting durable memories from the user's latest messages.";
+    "You are extracting durable memories from the user's latest messages";
 const MEMORIES_FALLBACK_RESPONSE: &str = "NO_MEMORIES";
 
 /// Create a mock server that will provide the responses, in order, for

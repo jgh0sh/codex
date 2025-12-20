@@ -1325,6 +1325,11 @@ impl Session {
         state.clone_history()
     }
 
+    pub(crate) async fn clone_history_tail(&self, max_items: usize) -> Vec<ResponseItem> {
+        let state = self.state.lock().await;
+        state.history.tail(max_items)
+    }
+
     pub(crate) async fn update_token_usage_info(
         &self,
         turn_context: &TurnContext,

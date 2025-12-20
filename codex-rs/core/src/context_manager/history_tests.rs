@@ -43,6 +43,18 @@ fn user_msg(text: &str) -> ResponseItem {
     }
 }
 
+#[test]
+fn tail_returns_last_items() {
+    let items = vec![
+        user_msg("first"),
+        assistant_msg("second"),
+        user_msg("third"),
+    ];
+    let history = create_history_with_items(items.clone());
+    let tail = history.tail(2);
+    assert_eq!(tail, items[1..].to_vec());
+}
+
 fn reasoning_msg(text: &str) -> ResponseItem {
     ResponseItem::Reasoning {
         id: String::new(),
